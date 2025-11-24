@@ -121,6 +121,9 @@ class StateCore
     
     /// @brief 注册状态图
     void RegistGraph(StateGraph& graph);
+
+    /// @brief 获得当前状态的引用
+    StateBlock& GetCurState();
     
     /// @brief 所掌控的状态图
     StateGraph* graphs[4];

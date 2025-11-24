@@ -121,6 +121,12 @@ void StateCore::Enable(uint8_t first_graph)
     }
 }
 
+StateBlock& StateCore::GetCurState()
+{
+    StateGraph& graph = *graphs[at_graph_id];
+    return graph.current_state; 
+}
+
 
 /**
  * @brief 绘制状态机图
