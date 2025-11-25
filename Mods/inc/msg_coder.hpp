@@ -32,8 +32,8 @@ public:
 
     /**      初始化     **/
     void Init(UART_HandleTypeDef *huart);
-    void SetFrameParam(uint8_t Frame_Head, uint8_t Frame_Type, uint8_t *Data, int data_len, uint8_t Frame_Tail);
     uint8_t CalculateFrameHead(uint8_t *data, int data_len);
+    void SetFrameParam(uint8_t Frame_Head, uint8_t Frame_Type, uint8_t *Data, int data_len, uint8_t Frame_Tail);
 
     /**     消息编码与解码  	**/
     int Encode(uint8_t *buf);

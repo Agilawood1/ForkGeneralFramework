@@ -39,7 +39,7 @@ static void UartMsgCoder_RxCallback(UART_HandleTypeDef *huart, uint8_t *rxData, 
         UartMsgCoder *targ_coder = UartMsgPointList[i]; // 取出实例
         if (targ_coder->uart_inst.huart == huart)
         {
-            uint8_t data[50] = {0};                                              // 临时数据缓冲区
+            uint8_t data[64] = {0};                                              // 临时数据缓冲区
             memcpy(data, rxData + 1, size - 2);                                  // 复制有效数据（去掉帧头、帧类型和帧尾）
             uint8_t frame_head = targ_coder->CalculateFrameHead(data, size - 2); // 计算帧头校验值
             uint8_t frame_tail = frame_head;                                     // 帧尾（与帧头相同）
@@ -155,13 +155,19 @@ bool UartMsgCoder::SendEncodedMsg(uint8_t *encoded_data, int length)
  * @brief 发送消息（自动编码并发送）
  * @param frame_type 帧类型
  * @param data 数据指针
- * @param data_len 数据长度
+ * @param data_len 数据长度（最大为64）
  * @return 发送成功返回 true，失败返回 false
  */
 bool UartMsgCoder::SendMsg(uint8_t frame_type, uint8_t *data, int data_len)
 {
-    uint8_t encoded_buf[70]; // 足够大的缓冲区
+    if (data_len > 64)
+    {
+        data_len = 64; // 限制最大长度为64
+    }
+
+    uint8_t encoded_buf[67]; // 足够大的缓冲区
     int encoded_len = EncodeMsg(frame_type, data, data_len, encoded_buf);
+
     if (encoded_len > 0)
     {
         return SendEncodedMsg(encoded_buf, encoded_len);
@@ -181,7 +187,7 @@ void UartMsgCoder::SetFrameParam(uint8_t Frame_Head, uint8_t Frame_Type, uint8_t
 {
     this->frame.frame_head = Frame_Head;                    // 设置帧头
     this->frame.frame_type = Frame_Type;                    // 设置帧类型
-    this->frame.data_len = (Data_Len > 32) ? 32 : Data_Len; // 设置数据包长度
+    this->frame.data_len = (Data_Len > 64) ? 64 : Data_Len; // 设置数据包长度
     memcpy(this->frame.data, Data, this->frame.data_len);   // 设置数据包
     this->frame.frame_tail = Frame_Tail;                    // 设置帧尾
 }
