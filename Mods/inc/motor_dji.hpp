@@ -1,5 +1,10 @@
-#ifndef MOTOR_DJI_H
-#define MOTOR_DJI_H
+/**
+ * @file motor_dji.hpp
+ * @author https://github.com/Huangney
+ * @date 2025-9-7
+ */
+#pragma once
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -18,8 +23,6 @@ else if (x < -y) 	\
 {					\
 	x = -y;			\
 }
-
-
 
 // 电机反馈信息结构体变量定义
 typedef struct
@@ -47,50 +50,80 @@ typedef enum
 class MotorDJI
 {
 private:
-	bool enabled = false; 				// 是否启用电机控制，若为否，发送0电流指令或不发送指令
-	uint16_t current_limit = 8000;		// 电流限幅
-	uint16_t speed_limit = 20000;		// 速度限幅
-	uint32_t sloperate = 600000;			// 电流爬坡率 / s
+	friend void _MotorDJI_DecodeMeasure(MotorDJI* motor_p, uint8_t *Data);
+	// 是否启用电机控制，若为否，发送0电流指令或不发送指令
+	bool enabled = false;
+	/// @brief 电机是否在线（私有）
+	bool _online_priv = false;
+	int _online_cnt = 0; 
+	/// @brief 电流限幅		
+	uint16_t _current_limit = 8000;
+	/// @brief 速度限幅 	(减速比前的RPM)
+	uint16_t _speed_limit = 20000;
+	/// @brief 爬坡率限制	(单位：current/s)
+	uint32_t _sloperate = 600000;
+	
+
+	/// @brief 前10次接收数据的平均时间间隔(最小单位：0.1ms，uint16精度)，用于判断电机在线质量
+	uint32_t _recv_tick = 0;
+	uint32_t _recv_sum_interval = 0;
+	uint16_t _recv_interval[10] = {0};
+	uint8_t _recv_last_index = 0;
+	bool _recv_looped = false;
+	/// @brief 根据前十次间隔计算的到的频率 (单位Hz)
+	float _recv_freq = 0.0f;
+
+	/// @brief 电机转速低通滤波系数（转速的低通滤波会导致严重的延迟）
+	float _read_rpm_lpf_rate = 1.0f; 
+	/// @brief 电机电流低通滤波系数
+	float _read_current_lpf_rate = 0.5f; 
 
 	/** 	  方法		**/
-	void MotorDji_SpeedLoop();
-	void MotorDji_PosLoop();
-	uint8_t GetCanSeg(uint8_t motor_id);
+	/// @brief 电机速度环控制 
+	void _MotorDJI_SpeedLoop();
+	/// @brief 电机位置环控制
+	void _MotorDJI_PosLoop();
+	/// @brief 获取电机所在的CAN段，用于发送
+	uint8_t _GetCanSeg(uint8_t motor_id);
 	
 public:
 	MotorDJI(){};
-	~MotorDJI(){};
 
 	/** 	  方法		**/
 	void Init(CAN_HandleTypeDef *hcan, uint8_t motorESC_id, MotorDJIMode djimode, bool fastInit = true);
 	void SwitchMode(MotorDJIMode new_mode);
-	void SetSpeed(float rpm, float redu_ratio = 19.0f);		// 3508的默认减速比（用2006的时候记得改！）
+	void SetSpeed(float rpm, float redu_ratio = 19.0f);			// 3508的默认减速比（用2006的时候记得改！）
 	void SetPos(float pos);
 	void Neutral();
 	void Disable();
 	void Enable();
-	bool IsEnabled();		// 返回电机控制是否启用
+	bool IsEnabled();											// 返回电机控制是否启用
 	int16_t Control();
 
 	/** 	静态方法	**/
 	static void ControlAllMotors();
+		
 
 
 	/** 	信息流变量	**/
-	moto_measure_t measure;	// 电机反馈信息结构体
-	float ReadRPM_LPF_rate = 1.0f; // 电机转速低通滤波系数
-	float ReadCurrent_LPF_rate = 0.5f; // 电机转速低通滤波系数
-	BspCan_Instance bspcan_inst;	// 电机的CAN实例
-	float current_LPS_rate = 1.0f; 		// 电流变化低通滤波系数（一般不用）
-	uint8_t at_can_seg = 0;				// 当前电机所在的CAN段，用于发送电流 注：0-3分别对应CAN1的1-4号电机，5-8号电机，CAN2的1-4号电机，5-8号电机
+	/// @brief 电机反馈信息结构体
+	moto_measure_t measure;	
+
+	/// @brief 电机是否在线（公开但只读）
+	const bool& online = _online_priv;	
+
+	/// @brief 电机的CAN实例
+	BspCan_Instance bspcan_inst;
+
+	/// @brief 当前电机所在的CAN段，用于发送电流 注：0-3分别对应CAN1的1-4号电机，5-8号电机，CAN2的1-4号电机，5-8号电机
+	uint8_t at_can_seg = 0;
 	
 	/** 	控制用变量	**/
-	
-	Pids speed_pid; 				// 速度环PID
-	Pids position_pid; 				// 位置环PID
+	Pids speed_pid; 					// 速度环PID
+	Pids position_pid; 					// 位置环PID
 	float targ_position = 0;			// 目标位置
 	float targ_speed = 0;		    	// 目标速度
-	float targ_current = 0;			// 目标电流
+	float targ_current = 0;				// 目标电流
 
 	/**		属性类变量	**/
 	MotorDJIMode mode = None_Control;	// 电机当前控制模式
@@ -106,11 +139,7 @@ typedef MotorDJI MotorC610;		// 本库对C620和C610的支持是通用的
 typedef MotorDJI MotorC620;		
 
 
-void get_total_angle(moto_measure_t *p);
-
-
 
 #ifdef __cplusplus
 }
 #endif
-#endif 

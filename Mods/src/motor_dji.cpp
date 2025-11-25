@@ -6,9 +6,10 @@
  */
 #include "motor_dji.hpp"
 #include "bsp_can.h"
+#include "bsp_dwt.h"
 
 #define CAN_OFFSET (hcan == &hcan1 ? 0 : 8)
-void MotorDji_RxCallback(CAN_RxHeaderTypeDef *RxHeader, uint8_t *RxData, CAN_HandleTypeDef *hcan);
+static void MotorDji_RxCallback(CAN_RxHeaderTypeDef *RxHeader, uint8_t *RxData, CAN_HandleTypeDef *hcan);
 static void MotorDji_SendCurrent(CAN_HandleTypeDef *hcan, int16_t motor_0, int16_t motor_1, int16_t motor_2, int16_t motor_3, bool more = false);
 
 
@@ -47,7 +48,7 @@ void MotorDJI::Init(CAN_HandleTypeDef *hcan, uint8_t motorESC_id, MotorDJIMode d
 	{
 		MotorPointList[motorESC_id + CAN_OFFSET] = this; 					// 根据CAN总线分配到0-7或8-15
 		MotorIndexList[MotorIndexCount++] = motorESC_id + CAN_OFFSET; 		// 记录电机ID
-		at_can_seg = GetCanSeg(motorESC_id + CAN_OFFSET); 					// 记录电机所在的CAN段
+		at_can_seg = _GetCanSeg(motorESC_id + CAN_OFFSET); 					// 记录电机所在的CAN段
 	}
 
 	// 初始化（即注册）该电机的CAN实例
@@ -117,7 +118,7 @@ bool MotorDJI::IsEnabled()
 /// @brief 判断电机所在的CAN段，用于发送
 /// @param motor_id 
 /// @return 所在的CAN段
-uint8_t MotorDJI::GetCanSeg(uint8_t motor_id)
+uint8_t MotorDJI::_GetCanSeg(uint8_t motor_id)
 {
 	if (motor_id >=1 && motor_id <= 4) return 0; // CAN1的1-4号电机
 	else if (motor_id >= 5 && motor_id <= 8) return 1; // CAN1的5-8号电机
@@ -143,7 +144,12 @@ void MotorDJI::ControlAllMotors()
 		uint8_t motor_id = MotorIndexList[i];
 		if (MotorPointList[motor_id] != nullptr)
 		{
-			int16_t targ_motor_current = MotorPointList[motor_id]->Control();
+			MotorDJI& mt = *MotorPointList[motor_id]; 
+			int16_t targ_motor_current = mt.Control();
+
+			mt._online_cnt -= 1; 				// 在线计时器递减
+			if (mt._online_cnt <= 0)	mt._online_priv = false; 		// 计时器到0，认为电机离
+			else mt._online_priv = true; 								// 计时器未到0，认为电机在线
 			
 			if (targ_motor_current != 0)		//	如果有控制需求，就激活对应的CAN段
 			{
@@ -194,12 +200,12 @@ int16_t MotorDJI::Control()
 		}
 		else if (mode == Speed_Control)
 		{
-			MotorDji_SpeedLoop();			// 速度环控制 得到电流
+			_MotorDJI_SpeedLoop();			// 速度环控制 得到电流
 		}
 		else if (mode == Pos_Control)
 		{
-			MotorDji_PosLoop();				// 位置环控制 得到速度
-			MotorDji_SpeedLoop();			// 速度环控制 得到电流
+			_MotorDJI_PosLoop();				// 位置环控制 得到速度
+			_MotorDJI_SpeedLoop();			// 速度环控制 得到电流
 		}
 	}
 	else
@@ -215,20 +221,17 @@ int16_t MotorDJI::Control()
  * @name C620 / C610 速度环控制
  * @details 计算RPM对应的控制电流
  */
-void MotorDJI::MotorDji_SpeedLoop()
+void MotorDJI::_MotorDJI_SpeedLoop()
 {
 	// 获取测量结构体
 	moto_measure_t *ptr = &measure;
 
 	// 计算目标的 速度PID输出（输出为电流）
-	float targ_current_temp = speed_pid.Calc(targ_speed, ptr->speed_rpm, current_limit);
-
-	// 计算最终电流数值
-	float targ_current_temp_f = (1.0f - current_LPS_rate) * targ_current + current_LPS_rate * targ_current_temp;
+	float targ_current_temp = speed_pid.Calc(targ_speed, ptr->speed_rpm, _current_limit);
 
 	// 限制爬坡率
-	float delta_current = targ_current_temp_f - targ_current;
-	float slope_value = sloperate * speed_pid.GetDt();
+	float delta_current = targ_current_temp - targ_current;
+	float slope_value = _sloperate * speed_pid.GetDt();
 
 	if (delta_current > slope_value)
 	{
@@ -240,26 +243,26 @@ void MotorDJI::MotorDji_SpeedLoop()
 	}
 	else
 	{
-		targ_current = targ_current_temp_f;
+		targ_current = targ_current_temp;
 	}
 
 	// 最终电流限幅
-	Lim_ABS(targ_current, current_limit)
+	Lim_ABS(targ_current, _current_limit)
 }
 
 /**
  * @name C620 / C610 位置环控制
  * @details 计算位置对应的控制电流
  */
-void MotorDJI::MotorDji_PosLoop()
+void MotorDJI::_MotorDJI_PosLoop()
 {
 	// 获取测量结构体
 	moto_measure_t *ptr = &measure;
 	// 计算目标的 位置PID输出（输出为速度）	
-	targ_speed = position_pid.Calc(targ_position, ptr->total_angle, speed_limit);
+	targ_speed = position_pid.Calc(targ_position, ptr->total_angle, _speed_limit);
 	
 	// 最终速度限幅
-	Lim_ABS(targ_speed, speed_limit)
+	Lim_ABS(targ_speed, _speed_limit)
 }
 
 
@@ -269,12 +272,12 @@ void MotorDJI::MotorDji_PosLoop()
  * @param {uint8_t} *Data接收到的数据
  * @return {*}无
  */
-static void MotorDji_DecodeMeasure(MotorDJI* motor_p, uint8_t *Data)
+void _MotorDJI_DecodeMeasure(MotorDJI* motor_p, uint8_t *Data)
 {
 	// 获取测量信息的指针和其他参数
 	moto_measure_t *ptr = &motor_p->measure;
-	float RPM_LPF_rate = motor_p->ReadRPM_LPF_rate;
-	float Current_LPF_rate = motor_p->ReadCurrent_LPF_rate;
+	float RPM_LPF_rate = motor_p->_read_rpm_lpf_rate;
+	float Current_LPF_rate = motor_p->_read_current_lpf_rate;
 
 	// 更新上一次的角度
 	ptr->last_angle = ptr->angle;
@@ -300,6 +303,28 @@ static void MotorDji_DecodeMeasure(MotorDJI* motor_p, uint8_t *Data)
 	else if (ptr->angle - ptr->last_angle < -4096)
 		ptr->round_cnt++;
 	ptr->total_angle = ptr->round_cnt * 8192 + ptr->angle - ptr->offset_angle;
+
+	// 重置在线计时器（倒计时100ms）
+	motor_p->_online_cnt = 100;
+
+	// 管理十次总共的时间间隔（先弹出最久的一次）
+	if (motor_p->_recv_looped) motor_p->_recv_sum_interval -= motor_p->_recv_interval[motor_p->_recv_last_index];
+
+	// 更新接收时间间隔数组和频率，并转换为0.1ms单位
+	motor_p->_recv_interval[motor_p->_recv_last_index] = static_cast<uint16_t>(DWT_GetDeltaTime(&(motor_p->_recv_tick)) * 10000);
+
+	// 将本次间隔加入总和
+	motor_p->_recv_sum_interval += motor_p->_recv_interval[motor_p->_recv_last_index++];
+	
+	// 更新下标，指向下一个位置，同时防止数组越界
+	if (motor_p->_recv_last_index >= 10)
+	{
+		motor_p->_recv_last_index = 0;
+		motor_p->_recv_looped = true;
+	}
+
+	// 计算平均接收时间间隔和频率
+	motor_p->_recv_freq = motor_p->_recv_sum_interval > 0 ?(10000.0f / (motor_p->_recv_sum_interval / 10.0f)) : 0.0f;
 }
 
 
@@ -309,14 +334,12 @@ static void MotorDji_DecodeMeasure(MotorDJI* motor_p, uint8_t *Data)
  * @param {uint8_t} *Data接收到的数据
  * @return {*}无
  */
-static void MotorDji_DecodeInitOffset(MotorDJI* motor_p, uint8_t *Data)
+static void _MotorDJI_DecodeInitOffset(MotorDJI* motor_p, uint8_t *Data)
 {
 	moto_measure_t *ptr = &motor_p->measure;
 	ptr->angle = (uint16_t)(Data[0] << 8 | Data[1]);
 	ptr->offset_angle = ptr->angle;
 }
-
-
 
 /**
  * @description: 发送电机电流控制
@@ -351,7 +374,7 @@ static void MotorDji_SendCurrent(CAN_HandleTypeDef *hcan, int16_t motor_0, int16
 /// @brief 接收回调函数
 /// @param RxHeader 
 /// @param RxData 
-void MotorDji_RxCallback(CAN_RxHeaderTypeDef *RxHeader, uint8_t *RxData, CAN_HandleTypeDef *hcan)
+static void MotorDji_RxCallback(CAN_RxHeaderTypeDef *RxHeader, uint8_t *RxData, CAN_HandleTypeDef *hcan)
 {
 	// 注意 motor_id 和 motorESC_id 的区别
 	uint8_t motor_id = ((RxHeader->StdId) & 0xff) - 0x200 + CAN_OFFSET; // 获取电机ID（带CAN偏置，以区分 CAN1和CAN2的电机ID）
@@ -361,5 +384,5 @@ void MotorDji_RxCallback(CAN_RxHeaderTypeDef *RxHeader, uint8_t *RxData, CAN_Han
 	MotorDJI &motor = *MotorPointList[motor_id]; 								// 获取对应的电机实例
 
 	// 更新电机反馈信息
-	motor.measure.msg_cnt++ <= 50 ? MotorDji_DecodeInitOffset(&motor, RxData) : MotorDji_DecodeMeasure(&motor, RxData);
+	motor.measure.msg_cnt++ <= 50 ? _MotorDJI_DecodeInitOffset(&motor, RxData) : _MotorDJI_DecodeMeasure(&motor, RxData);
 }
