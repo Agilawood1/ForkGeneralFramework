@@ -16,6 +16,8 @@ extern "C" {
 class Relay
 {
 public:
+    Relay() {};
+
     enum State 
     {
         OFF = 0,
@@ -26,18 +28,14 @@ public:
         HIGH_ON = 0, // 高电平触发型
         LOW_ON = 1   // 低电平触发型
     };
-    // Relay() {};
-    Relay(GPIO_TypeDef* GPIOx, uint32_t Pin, TriggerType trig_type): _state(OFF), _trig_type(trig_type), initialized(true)
-    {
-        BspGpio_InstRegist(&_gpio_inst, GPIOx, Pin);
-    }
+
     /**
       * @brief 初始化一个继电器通道并绑定GPIO
       * @param GPIOx GPIO端口
       * @param Pin GPIO引脚
       * @param trig_type 触发逻辑:高电平触发或低电平触发
       */
-    // void Init(GPIO_TypeDef *GPIOx, uint32_t Pin, TriggerType trig_type); 
+    void Init(GPIO_TypeDef *GPIOx, uint32_t Pin, TriggerType trig_type); 
     void On();   // 打开继电器
     void Off();  // 关闭继电器
 

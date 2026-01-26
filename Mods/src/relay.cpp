@@ -7,13 +7,13 @@
 
 #include "relay.hpp"
 
-// void Relay::Init(GPIO_TypeDef *GPIOx, uint32_t Pin, TriggerType trig_type)
-// {
-//     BspGpio_InstRegist(&_gpio_inst, GPIOx, Pin);
-//     _trig_type = trig_type;
-//     _Set(OFF);
-//     initialized = true;
-// }
+void Relay::Init(GPIO_TypeDef *GPIOx, uint32_t Pin, TriggerType trig_type)
+{
+    BspGpio_InstRegist(&_gpio_inst, GPIOx, Pin);
+    _trig_type = trig_type;
+    initialized = true;
+    _Set(OFF);
+}
 
 void Relay::_Set(State state)
 {
