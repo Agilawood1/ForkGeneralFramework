@@ -25,14 +25,14 @@ void MainFrameCpp()
     System.monit.Track(chas.motors[3].targ_current);
 
     chas.Config(true);
-
+    chas.Enable();
     System.SetPositionSource(System.odometer.transform);
 
     System.RegistApp(chas);
     
-    grp.Degenerate(DegeAct);
-    core.RegistGraph(grp);
-    core.Enable(0);
+//     grp.Degenerate(DegeAct);
+//     core.RegistGraph(grp);
+//     core.Enable(0);
 }
 
 

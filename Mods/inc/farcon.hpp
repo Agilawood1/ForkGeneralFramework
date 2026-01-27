@@ -6,17 +6,16 @@
 #ifndef _FARCON_HPP_
 #define _FARCON_HPP_
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+//#ifdef __cplusplus
+//extern "C" {
+//#endif
 
 #include "stm32f4xx_hal.h"
-
 #include "bsp_uart.h"
 
-#ifdef __cplusplus
-}
-#endif
+//#ifdef __cplusplus
+//}
+//#endif
 
 #define pos_data_length 10
 class Farcon
