@@ -1,15 +1,40 @@
 #pragma once
-#include "bsp_halport.hpp"
 
-typedef struct BspSpi_Instance_t {
-  SPI_HandleTypeDef *hspi;
-  GPIO_TypeDef *cs_port;
-  uint32_t cs_pin;
-} BspSpi_Instance;
+#include <cstdint>
+#include "std_math.hpp"
 
-void BspSpi_InstRegist(BspSpi_Instance *inst, SPI_HandleTypeDef *hspi,
-                       GPIO_TypeDef *cs_port, uint32_t cs_pin);
-void BspSpi_Transmit(BspSpi_Instance *inst, uint8_t *pTxData, uint16_t Size);
-void BspSpi_Receive(BspSpi_Instance *inst, uint8_t *pRxData, uint16_t Size);
-void BspSpi_TransRecv(BspSpi_Instance *inst, uint8_t *pTxData, uint8_t *pRxData,
-                      uint16_t Size);
+namespace BSP
+{
+    namespace SPI
+    {
+        // 不透明指针替代 SPI_HandleTypeDef*
+        struct OpaqueSpi;
+        using SpiID = OpaqueSpi*;
+
+        /**
+         * @brief SPI 总线设备从机侧类
+         * @note 每个实例代表挂载在SPI总线上的单个从设备
+         */
+        class Device
+        {
+        public:
+            Device() = default;
+            
+            // 构造函数：指定所挂载的SPI句柄及CS引脚
+            Device(SpiID spi, Pin cs_pin = {'\0', 0});
+
+            void Init(SpiID spi, Pin cs_pin = {'\0', 0});
+
+            void Transmit(uint8_t* tx_data, uint16_t size);
+            void Receive(uint8_t* rx_data, uint16_t size);
+            void TransRecv(uint8_t* tx_data, uint8_t* rx_data, uint16_t size);
+            
+            SpiID spi_id;
+
+        private:
+            void* cs_port_;     // 内部使用void*保存GPIO_TypeDef*，对外隐藏
+            uint16_t cs_pin_;   // 保存解码后的GPIO_PIN_X
+            bool has_cs_;
+        };
+    }
+}

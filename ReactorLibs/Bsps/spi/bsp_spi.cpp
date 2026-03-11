@@ -1,38 +1,104 @@
 #include "bsp_spi.hpp"
+#include "bsp_halport.hpp"
 
-void BspSpi_InstRegist(BspSpi_Instance *inst, SPI_HandleTypeDef *hspi,
-                       GPIO_TypeDef *cs_port, uint32_t cs_pin) {
-  inst->hspi = hspi;
-  inst->cs_port = cs_port;
-  inst->cs_pin = cs_pin;
+namespace BSP
+{
+    namespace SPI
+    {
+        Device::Device(SpiID spi, Pin cs_pin)
+        {
+            this->Init(spi, cs_pin);
+        }
 
-  // 初始化时拉高片选，保证总线空闲（配置了软件CS时）
-  if (inst->cs_port != NULL) {
-    HAL_GPIO_WritePin(inst->cs_port, inst->cs_pin, GPIO_PIN_SET);
-  }
-}
+        void Device::Init(SpiID spi, Pin cs_pin)
+        {
+            this->spi_id = spi;
 
-void BspSpi_Transmit(BspSpi_Instance *inst, uint8_t *pTxData, uint16_t Size) {
-  if (inst->cs_port != NULL)
-    HAL_GPIO_WritePin(inst->cs_port, inst->cs_pin, GPIO_PIN_RESET);
-  HAL_SPI_Transmit(inst->hspi, pTxData, Size, 100);
-  if (inst->cs_port != NULL)
-    HAL_GPIO_WritePin(inst->cs_port, inst->cs_pin, GPIO_PIN_SET);
-}
+            if (cs_pin.port == '\0' || cs_pin.port == 0) {
+                this->has_cs_ = false;
+                this->cs_port_ = nullptr;
+                this->cs_pin_ = 0;
+            } else {
+                this->has_cs_ = true;
+                this->cs_pin_ = (1 << cs_pin.number);
 
-void BspSpi_Receive(BspSpi_Instance *inst, uint8_t *pRxData, uint16_t Size) {
-  if (inst->cs_port != NULL)
-    HAL_GPIO_WritePin(inst->cs_port, inst->cs_pin, GPIO_PIN_RESET);
-  HAL_SPI_Receive(inst->hspi, pRxData, Size, 100);
-  if (inst->cs_port != NULL)
-    HAL_GPIO_WritePin(inst->cs_port, inst->cs_pin, GPIO_PIN_SET);
-}
+                switch (cs_pin.port) {
+#ifdef GPIOA
+                    case 'A': this->cs_port_ = (void*)GPIOA; break;
+#endif
+#ifdef GPIOB
+                    case 'B': this->cs_port_ = (void*)GPIOB; break;
+#endif
+#ifdef GPIOC
+                    case 'C': this->cs_port_ = (void*)GPIOC; break;
+#endif
+#ifdef GPIOD
+                    case 'D': this->cs_port_ = (void*)GPIOD; break;
+#endif
+#ifdef GPIOE
+                    case 'E': this->cs_port_ = (void*)GPIOE; break;
+#endif
+#ifdef GPIOF
+                    case 'F': this->cs_port_ = (void*)GPIOF; break;
+#endif
+#ifdef GPIOG
+                    case 'G': this->cs_port_ = (void*)GPIOG; break;
+#endif
+#ifdef GPIOH
+                    case 'H': this->cs_port_ = (void*)GPIOH; break;
+#endif
+#ifdef GPIOI
+                    case 'I': this->cs_port_ = (void*)GPIOI; break;
+#endif
+                    default: this->cs_port_ = nullptr; this->has_cs_ = false; break;
+                }
+            }
 
-void BspSpi_TransRecv(BspSpi_Instance *inst, uint8_t *pTxData, uint8_t *pRxData,
-                      uint16_t Size) {
-  if (inst->cs_port != NULL)
-    HAL_GPIO_WritePin(inst->cs_port, inst->cs_pin, GPIO_PIN_RESET);
-  HAL_SPI_TransmitReceive(inst->hspi, pTxData, pRxData, Size, 100);
-  if (inst->cs_port != NULL)
-    HAL_GPIO_WritePin(inst->cs_port, inst->cs_pin, GPIO_PIN_SET);
+            // 初始化时拉高片选，保证总线空闲
+            if (this->has_cs_ && this->cs_port_ != nullptr) {
+#ifdef USE_REAL_HAL
+                HAL_GPIO_WritePin((GPIO_TypeDef*)this->cs_port_, this->cs_pin_, GPIO_PIN_SET);
+#endif
+            }
+        }
+
+        void Device::Transmit(uint8_t* tx_data, uint16_t size)
+        {
+#ifdef USE_REAL_HAL
+            if (this->has_cs_)
+                HAL_GPIO_WritePin((GPIO_TypeDef*)this->cs_port_, this->cs_pin_, GPIO_PIN_RESET);
+                
+            HAL_SPI_Transmit((SPI_HandleTypeDef*)this->spi_id, tx_data, size, 100);
+            
+            if (this->has_cs_)
+                HAL_GPIO_WritePin((GPIO_TypeDef*)this->cs_port_, this->cs_pin_, GPIO_PIN_SET);
+#endif
+        }
+
+        void Device::Receive(uint8_t* rx_data, uint16_t size)
+        {
+#ifdef USE_REAL_HAL
+            if (this->has_cs_)
+                HAL_GPIO_WritePin((GPIO_TypeDef*)this->cs_port_, this->cs_pin_, GPIO_PIN_RESET);
+                
+            HAL_SPI_Receive((SPI_HandleTypeDef*)this->spi_id, rx_data, size, 100);
+            
+            if (this->has_cs_)
+                HAL_GPIO_WritePin((GPIO_TypeDef*)this->cs_port_, this->cs_pin_, GPIO_PIN_SET);
+#endif
+        }
+
+        void Device::TransRecv(uint8_t* tx_data, uint8_t* rx_data, uint16_t size)
+        {
+#ifdef USE_REAL_HAL
+            if (this->has_cs_)
+                HAL_GPIO_WritePin((GPIO_TypeDef*)this->cs_port_, this->cs_pin_, GPIO_PIN_RESET);
+                
+            HAL_SPI_TransmitReceive((SPI_HandleTypeDef*)this->spi_id, tx_data, rx_data, size, 100);
+            
+            if (this->has_cs_)
+                HAL_GPIO_WritePin((GPIO_TypeDef*)this->cs_port_, this->cs_pin_, GPIO_PIN_SET);
+#endif
+        }
+    }
 }

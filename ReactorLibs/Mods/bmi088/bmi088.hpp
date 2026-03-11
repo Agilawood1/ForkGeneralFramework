@@ -18,8 +18,8 @@ struct BMI088_Data_t {
 // BMI088 驱动类
 class BMI088 {
 private:
-  BspSpi_Instance *spi_acc = nullptr;
-  BspSpi_Instance *spi_gyro = nullptr;
+  BSP::SPI::Device *spi_acc = nullptr;
+  BSP::SPI::Device *spi_gyro = nullptr;
 
   // IMU数据
 public:
@@ -60,7 +60,7 @@ public:
    * @param _spi_gyro 陀螺仪所在的SPI实例指针
    * @return true 初始化成功, false 失败
    */
-  bool Init(BspSpi_Instance *_spi_acc, BspSpi_Instance *_spi_gyro);
+  bool Init(BSP::SPI::Device *_spi_acc, BSP::SPI::Device *_spi_gyro);
 
   /**
    * @brief 阻塞读取BMI088数据并更新内部值

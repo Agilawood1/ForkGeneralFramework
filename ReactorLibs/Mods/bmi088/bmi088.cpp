@@ -1,6 +1,7 @@
 #include "bmi088.hpp"
 #include <math.h>
 #include <string.h>
+#include "bsp_halport.hpp"
 
 // 辅助向量求模函数
 static float NormOf3d(const float *vec) {
@@ -20,7 +21,7 @@ void BMI088::_AccelRead(uint8_t reg, uint8_t *dataptr, uint8_t len) {
   uint8_t rx[8] = {0};
   tx[0] = 0x80 | reg; // 读操作，最高位置1
   // 需要发送 len + 2 个字节
-  BspSpi_TransRecv(spi_acc, tx, rx, len + 2);
+  spi_acc->TransRecv(tx, rx, len + 2);
   memcpy(dataptr, rx + 2, len);
 }
 
@@ -30,18 +31,18 @@ void BMI088::_GyroRead(uint8_t reg, uint8_t *dataptr, uint8_t len) {
   uint8_t tx[7] = {0};
   uint8_t rx[7] = {0};
   tx[0] = 0x80 | reg;
-  BspSpi_TransRecv(spi_gyro, tx, rx, len + 1);
+  spi_gyro->TransRecv(tx, rx, len + 1);
   memcpy(dataptr, rx + 1, len);
 }
 
 void BMI088::_AccelWriteSingleReg(uint8_t reg, uint8_t data) {
   uint8_t tx[2] = {reg, data};
-  BspSpi_Transmit(spi_acc, tx, 2);
+  spi_acc->Transmit(tx, 2);
 }
 
 void BMI088::_GyroWriteSingleReg(uint8_t reg, uint8_t data) {
   uint8_t tx[2] = {reg, data};
-  BspSpi_Transmit(spi_gyro, tx, 2);
+  spi_gyro->Transmit(tx, 2);
 }
 
 uint8_t BMI088::_AccelInit() {
@@ -134,7 +135,7 @@ uint8_t BMI088::_GyroInit() {
   return 0;
 }
 
-bool BMI088::Init(BspSpi_Instance *_spi_acc, BspSpi_Instance *_spi_gyro) {
+bool BMI088::Init(BSP::SPI::Device *_spi_acc, BSP::SPI::Device *_spi_gyro) {
   spi_acc = _spi_acc;
   spi_gyro = _spi_gyro;
   _delay_ms(50); // 上电稳定延时

@@ -1,12 +1,18 @@
 #ifndef STD_MSG_UP70
 #define STD_MSG_UP70
 
-#include "bsp_halport.hpp"
+#include <cstdint>
 
 #define BSP_SQRT2 1.41421356237f
 #define BSP_SQRT3 1.73205080757f
 
 typedef uint8_t byte;
+
+/// @brief GPIO 引脚定义结构体
+struct Pin {
+    char port;       // 'A', 'B', 'C', ..., 留空或 '\0' 表示无 CS 引脚
+    uint8_t number;  // 0 - 15
+};
 
 
 class Vec2;
