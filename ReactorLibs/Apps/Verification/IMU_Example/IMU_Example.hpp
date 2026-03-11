@@ -13,8 +13,8 @@ class IMU_Example : public Application
   APPLICATION_OVERRIDE
 
 private:
-  BspSpi_Instance spi_acc_inst_;
-  BspSpi_Instance spi_gyro_inst_;
+  BSP::SPI::Device spi_acc_inst_;
+  BSP::SPI::Device spi_gyro_inst_;
   BMI088 imu_;
   uint32_t tick_cnt_ = 0; // 更新计数器，用于降频打印
 };

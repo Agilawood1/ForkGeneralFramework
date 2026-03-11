@@ -1,10 +1,10 @@
 #ifndef BSP_GPIO_H
 #define BSP_GPIO_H
+#include "bsp_halport.hpp"
+
 #ifdef __cplusplus
 extern "C"{
 #endif
-
-#include "bsp_halport.hpp"
 
 #define BSPGPIO_MAX_INSTS 140 // 最多支持140个GPIO实例
 

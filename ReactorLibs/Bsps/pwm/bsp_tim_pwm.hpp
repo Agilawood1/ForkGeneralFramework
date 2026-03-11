@@ -1,11 +1,11 @@
 #ifndef BSP_TIM_PWM_H
 #define BSP_TIM_PWM_H
+#include "bsp_halport.hpp"
+
 #ifdef __cplusplus
 extern "C"
 {
 #endif
-
-#include "bsp_halport.hpp"
 
 typedef struct BspTIMPWM_t
 {
