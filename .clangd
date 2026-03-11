@@ -8,6 +8,9 @@ CompileFlags:
   Add: [-xc++]
 ---
 If:
-  PathMatch: .*/stm32f4xx_hal_def\.h
+  PathMatch: [.*\/stm32f4xx_hal_def\.h, .*\/arm_math\.h]
 Diagnostics:
   Suppress: "*"
+---
+Diagnostics:
+  UnusedIncludes: None
