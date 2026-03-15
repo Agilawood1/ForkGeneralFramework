@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include "System.hpp"
 #include "bmi088.hpp"
 
@@ -13,8 +14,19 @@ class IMU_Example : public Application
   APPLICATION_OVERRIDE
 
 private:
+  enum class DmaStep : uint8_t
+  {
+    AccTrigger = 0,
+    AccWait,
+    GyroTrigger,
+    GyroWait
+  };
+
   BSP::SPI::Device spi_acc_inst_;
   BSP::SPI::Device spi_gyro_inst_;
   BMI088 imu_;
+  DmaStep dma_step_ = DmaStep::AccTrigger;
   uint32_t tick_cnt_ = 0; // 更新计数器，用于降频打印
+  uint32_t dma_fail_cnt_ = 0;
+  uint32_t dma_pending_cnt_ = 0;
 };

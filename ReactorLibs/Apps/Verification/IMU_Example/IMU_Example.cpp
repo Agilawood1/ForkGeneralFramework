@@ -10,6 +10,10 @@
 
 void IMU_Example::Start()
 {
+  dma_step_ = DmaStep::AccTrigger;
+  dma_fail_cnt_ = 0;
+  dma_pending_cnt_ = 0;
+
   // 配置 SPI 实例: CS1_Accel -> PA4, CS1_Gyro -> PB0
   spi_acc_inst_.Init((BSP::SPI::SpiID)&hspi1, {'A', 4});
   spi_gyro_inst_.Init((BSP::SPI::SpiID)&hspi1, {'B', 0}); // 假设加速度计和陀螺仪共用SPI1，仅CS不同
@@ -44,11 +48,70 @@ void IMU_Example::Update()
 
   // 周期性更新数据
 #if IMU_EXAMPLE_USE_DMA
-  // 最小可用 DMA 测试链路：触发并解析陀螺仪与加速度计数据
-  imu_.TriggerAccelDMA();
-  imu_.ParseAccelDMA();
-  imu_.TriggerGyroDMA();
-  imu_.ParseGyroDMA();
+  // 非阻塞 DMA 状态机：每次 Update 仅推进一步
+  switch (dma_step_)
+  {
+  case DmaStep::AccTrigger:
+    if (imu_.TriggerAccelDMA())
+    {
+      dma_step_ = DmaStep::AccWait;
+    }
+    else
+    {
+      dma_fail_cnt_++;
+    }
+    break;
+
+  case DmaStep::AccWait:
+  {
+    BSP::SPI::DmaState state = imu_.ParseAccelDMA();
+    if (state == BSP::SPI::DmaState::Done)
+    {
+      dma_step_ = DmaStep::GyroTrigger;
+    }
+    else if (state == BSP::SPI::DmaState::Error)
+    {
+      dma_fail_cnt_++;
+      dma_step_ = DmaStep::AccTrigger;
+    }
+    else
+    {
+      dma_pending_cnt_++;
+    }
+    break;
+  }
+
+  case DmaStep::GyroTrigger:
+    if (imu_.TriggerGyroDMA())
+    {
+      dma_step_ = DmaStep::GyroWait;
+    }
+    else
+    {
+      dma_fail_cnt_++;
+      dma_step_ = DmaStep::AccTrigger;
+    }
+    break;
+
+  case DmaStep::GyroWait:
+  {
+    BSP::SPI::DmaState state = imu_.ParseGyroDMA();
+    if (state == BSP::SPI::DmaState::Done)
+    {
+      dma_step_ = DmaStep::AccTrigger;
+    }
+    else if (state == BSP::SPI::DmaState::Error)
+    {
+      dma_fail_cnt_++;
+      dma_step_ = DmaStep::AccTrigger;
+    }
+    else
+    {
+      dma_pending_cnt_++;
+    }
+    break;
+  }
+  }
 #else
   imu_.Update();
 #endif
@@ -59,6 +122,9 @@ void IMU_Example::Update()
     // 打印陀螺仪数据进行测试
     const float *gyro = imu_.GetGyro();
     monit.LogInfo("IMU_Gyro, x:%.3f, y:%.3f, z:%.3f", gyro[0], gyro[1], gyro[2]);
+#if IMU_EXAMPLE_USE_DMA
+    monit.LogInfo("IMU_DMA, fail:%lu, pending:%lu", dma_fail_cnt_, dma_pending_cnt_);
+#endif
     tick_cnt_ = 0;
   }
 }

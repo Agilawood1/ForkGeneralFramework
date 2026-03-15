@@ -198,42 +198,50 @@ void BMI088::Update()
       BMI088_TEMP_OFFSET;
 }
 
-void BMI088::TriggerAccelDMA()
+bool BMI088::TriggerAccelDMA()
 {
   if (!_online)
-    return;
+    return false;
   tx_buf_acc[0] = 0x80 | BMI088_ACCEL_XOUT_L;
-  spi_acc->TransRecvDMA(tx_buf_acc, rx_buf_acc, 8);
+  return spi_acc->TransRecvDMA(tx_buf_acc, rx_buf_acc, 8);
 }
 
-void BMI088::ParseAccelDMA()
+BSP::SPI::DmaState BMI088::ParseAccelDMA()
 {
   if (!_online)
-    return;
+    return BSP::SPI::DmaState::Error;
+  BSP::SPI::DmaState state = spi_acc->ConsumeDmaState();
+  if (state != BSP::SPI::DmaState::Done)
+    return state;
   for (uint8_t i = 0; i < 3; i++)
   {
     // 加速度计有效数据从 rx_buf_acc[2] 开始
     acc[i] = acc_coef * (float)(int16_t)(((rx_buf_acc[2 * i + 3]) << 8) | rx_buf_acc[2 * i + 2]);
   }
+  return BSP::SPI::DmaState::Done;
 }
 
-void BMI088::TriggerGyroDMA()
+bool BMI088::TriggerGyroDMA()
 {
   if (!_online)
-    return;
+    return false;
   tx_buf_gyro[0] = 0x80 | BMI088_GYRO_X_L;
-  spi_gyro->TransRecvDMA(tx_buf_gyro, rx_buf_gyro, 7);
+  return spi_gyro->TransRecvDMA(tx_buf_gyro, rx_buf_gyro, 7);
 }
 
-void BMI088::ParseGyroDMA()
+BSP::SPI::DmaState BMI088::ParseGyroDMA()
 {
   if (!_online)
-    return;
+    return BSP::SPI::DmaState::Error;
+  BSP::SPI::DmaState state = spi_gyro->ConsumeDmaState();
+  if (state != BSP::SPI::DmaState::Done)
+    return state;
   for (uint8_t i = 0; i < 3; i++)
   {
     // 陀螺仪有效数据从 rx_buf_gyro[1] 开始
     gyro[i] = gyro_sen * (float)(int16_t)(((rx_buf_gyro[2 * i + 2]) << 8) | rx_buf_gyro[2 * i + 1]) - gyro_offset[i];
   }
+  return BSP::SPI::DmaState::Done;
 }
 
 void BMI088::CalibrateIMU()

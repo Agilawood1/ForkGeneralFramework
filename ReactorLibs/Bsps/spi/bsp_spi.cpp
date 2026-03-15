@@ -10,6 +10,7 @@ static constexpr uint8_t MAX_SPI_BUS_NUM = 6;
 struct SpiBusState {
     SpiID spi_id;
     Device* active_device;
+    DmaState dma_state;
 };
 static SpiBusState spi_buses[MAX_SPI_BUS_NUM];
 static uint8_t spi_buses_count = 0;
@@ -24,6 +25,7 @@ static void SetActiveDevice(SpiID id, Device* dev) {
     if (spi_buses_count < MAX_SPI_BUS_NUM) {
         spi_buses[spi_buses_count].spi_id = id;
         spi_buses[spi_buses_count].active_device = dev;
+        spi_buses[spi_buses_count].dma_state = DmaState::Idle;
         spi_buses_count++;
     }
 }
@@ -35,6 +37,30 @@ static Device* GetActiveDevice(SpiID id) {
         }
     }
     return nullptr;
+}
+
+static void SetDmaState(SpiID id, DmaState state) {
+    for (uint8_t i = 0; i < spi_buses_count; i++) {
+        if (spi_buses[i].spi_id == id) {
+            spi_buses[i].dma_state = state;
+            return;
+        }
+    }
+    if (spi_buses_count < MAX_SPI_BUS_NUM) {
+        spi_buses[spi_buses_count].spi_id = id;
+        spi_buses[spi_buses_count].active_device = nullptr;
+        spi_buses[spi_buses_count].dma_state = state;
+        spi_buses_count++;
+    }
+}
+
+static DmaState GetDmaState(SpiID id) {
+    for (uint8_t i = 0; i < spi_buses_count; i++) {
+        if (spi_buses[i].spi_id == id) {
+            return spi_buses[i].dma_state;
+        }
+    }
+    return DmaState::Idle;
 }
 
 Device::Device(SpiID spi, Pin cs_pin)
@@ -179,31 +205,86 @@ void Device::Deselect()
 #endif
 }
 
-void Device::TransmitDMA(uint8_t *tx_data, uint16_t size)
+bool Device::TransmitDMA(uint8_t *tx_data, uint16_t size)
 {
 #ifdef USE_REAL_HAL
-  SetActiveDevice(this->spi_id, this);
+  if (GetDmaState(this->spi_id) == DmaState::Busy)
+    return false;
+
   this->Select();
-  HAL_SPI_Transmit_DMA((SPI_HandleTypeDef *)this->spi_id, tx_data, size);
+  HAL_StatusTypeDef status =
+      HAL_SPI_Transmit_DMA((SPI_HandleTypeDef *)this->spi_id, tx_data, size);
+  if (status == HAL_OK)
+  {
+    SetActiveDevice(this->spi_id, this);
+    SetDmaState(this->spi_id, DmaState::Busy);
+    return true;
+  }
+
+  this->Deselect();
+  SetActiveDevice(this->spi_id, nullptr);
+  SetDmaState(this->spi_id, DmaState::Error);
+  return false;
 #endif
+  return false;
 }
 
-void Device::ReceiveDMA(uint8_t *rx_data, uint16_t size)
+bool Device::ReceiveDMA(uint8_t *rx_data, uint16_t size)
 {
 #ifdef USE_REAL_HAL
-  SetActiveDevice(this->spi_id, this);
+  if (GetDmaState(this->spi_id) == DmaState::Busy)
+    return false;
+
   this->Select();
-  HAL_SPI_Receive_DMA((SPI_HandleTypeDef *)this->spi_id, rx_data, size);
+  HAL_StatusTypeDef status =
+      HAL_SPI_Receive_DMA((SPI_HandleTypeDef *)this->spi_id, rx_data, size);
+  if (status == HAL_OK)
+  {
+    SetActiveDevice(this->spi_id, this);
+    SetDmaState(this->spi_id, DmaState::Busy);
+    return true;
+  }
+
+  this->Deselect();
+  SetActiveDevice(this->spi_id, nullptr);
+  SetDmaState(this->spi_id, DmaState::Error);
+  return false;
 #endif
+  return false;
 }
 
-void Device::TransRecvDMA(uint8_t *tx_data, uint8_t *rx_data, uint16_t size)
+bool Device::TransRecvDMA(uint8_t *tx_data, uint8_t *rx_data, uint16_t size)
 {
 #ifdef USE_REAL_HAL
-  SetActiveDevice(this->spi_id, this);
+  if (GetDmaState(this->spi_id) == DmaState::Busy)
+    return false;
+
   this->Select();
-  HAL_SPI_TransmitReceive_DMA((SPI_HandleTypeDef *)this->spi_id, tx_data, rx_data, size);
+  HAL_StatusTypeDef status = HAL_SPI_TransmitReceive_DMA(
+      (SPI_HandleTypeDef *)this->spi_id, tx_data, rx_data, size);
+  if (status == HAL_OK)
+  {
+    SetActiveDevice(this->spi_id, this);
+    SetDmaState(this->spi_id, DmaState::Busy);
+    return true;
+  }
+
+  this->Deselect();
+  SetActiveDevice(this->spi_id, nullptr);
+  SetDmaState(this->spi_id, DmaState::Error);
+  return false;
 #endif
+  return false;
+}
+
+DmaState Device::ConsumeDmaState()
+{
+  DmaState state = GetDmaState(this->spi_id);
+  if (state == DmaState::Done || state == DmaState::Error)
+  {
+    SetDmaState(this->spi_id, DmaState::Idle);
+  }
+  return state;
 }
 
 } // namespace SPI
@@ -217,8 +298,8 @@ static void SPI_DeselectActiveDevice(SPI_HandleTypeDef *hspi)
   if (dev != nullptr)
   {
     dev->Deselect();
-    BSP::SPI::SetActiveDevice((BSP::SPI::SpiID)hspi, nullptr); // 清除活跃设备绑定
   }
+  BSP::SPI::SetActiveDevice((BSP::SPI::SpiID)hspi, nullptr); // 清除活跃设备绑定
 }
 
 // === HAL 层中断回调重载 ===
@@ -226,20 +307,24 @@ static void SPI_DeselectActiveDevice(SPI_HandleTypeDef *hspi)
 void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi)
 {
   SPI_DeselectActiveDevice(hspi);
+  BSP::SPI::SetDmaState((BSP::SPI::SpiID)hspi, BSP::SPI::DmaState::Done);
 }
 
 void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi)
 {
   SPI_DeselectActiveDevice(hspi);
+  BSP::SPI::SetDmaState((BSP::SPI::SpiID)hspi, BSP::SPI::DmaState::Done);
 }
 
 void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
 {
   SPI_DeselectActiveDevice(hspi);
+  BSP::SPI::SetDmaState((BSP::SPI::SpiID)hspi, BSP::SPI::DmaState::Done);
 }
 
 void HAL_SPI_ErrorCallback(SPI_HandleTypeDef *hspi)
 {
   SPI_DeselectActiveDevice(hspi);
+  BSP::SPI::SetDmaState((BSP::SPI::SpiID)hspi, BSP::SPI::DmaState::Error);
 }
 #endif

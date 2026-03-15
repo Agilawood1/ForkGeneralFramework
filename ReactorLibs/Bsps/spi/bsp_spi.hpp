@@ -7,6 +7,14 @@ namespace BSP
 {
     namespace SPI
     {
+        enum class DmaState : uint8_t
+        {
+            Idle = 0,
+            Busy,
+            Done,
+            Error
+        };
+
         // 不透明指针替代 SPI_HandleTypeDef*
         struct OpaqueSpi;
         using SpiID = OpaqueSpi*;
@@ -29,9 +37,11 @@ namespace BSP
             void Receive(uint8_t* rx_data, uint16_t size);
             void TransRecv(uint8_t* tx_data, uint8_t* rx_data, uint16_t size);
             
-            void TransmitDMA(uint8_t* tx_data, uint16_t size);
-            void ReceiveDMA(uint8_t* rx_data, uint16_t size);
-            void TransRecvDMA(uint8_t* tx_data, uint8_t* rx_data, uint16_t size);
+            bool TransmitDMA(uint8_t* tx_data, uint16_t size);
+            bool ReceiveDMA(uint8_t* rx_data, uint16_t size);
+            bool TransRecvDMA(uint8_t* tx_data, uint8_t* rx_data, uint16_t size);
+
+            DmaState ConsumeDmaState();
 
             void Select();
             void Deselect();

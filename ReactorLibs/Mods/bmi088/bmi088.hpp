@@ -79,22 +79,22 @@ public:
   /**
    * @brief 触发加速度计的 DMA 异步读取
    */
-  void TriggerAccelDMA();
+  bool TriggerAccelDMA();
 
   /**
    * @brief 解析加速度计的 DMA 接收数据
    */
-  void ParseAccelDMA();
+  BSP::SPI::DmaState ParseAccelDMA();
 
   /**
    * @brief 触发陀螺仪的 DMA 异步读取
    */
-  void TriggerGyroDMA();
+  bool TriggerGyroDMA();
 
   /**
    * @brief 解析陀螺仪的 DMA 接收数据
    */
-  void ParseGyroDMA();
+  BSP::SPI::DmaState ParseGyroDMA();
 
   /**
    * @brief 标定传感器（静止状态下进行，耗时较长）
