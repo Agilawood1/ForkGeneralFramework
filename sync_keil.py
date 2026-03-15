@@ -50,7 +50,7 @@ def scan_files(root_dir, target_base_dir):
             dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
 
             # 计算相对于 MDK-ARM 的路径
-            rel_path_from_proj = os.path.relpath(root, target_base_dir)
+            rel_path_from_proj = os.path.relpath(root, target_base_dir).replace("\\", "/")
 
             # --- 逻辑1: 收集头文件路径 ---
             if any(f.lower().endswith((".h", ".hpp")) for f in files):
@@ -69,7 +69,7 @@ def scan_files(root_dir, target_base_dir):
             for file in files:
                 ext = os.path.splitext(file)[1].lower()
                 if ext in SOURCE_EXT_MAP:
-                    file_path = os.path.join(rel_path_from_proj, file)
+                    file_path = os.path.join(rel_path_from_proj, file).replace("\\", "/")
                     group_files.append(
                         {
                             "name": file,
@@ -127,10 +127,10 @@ def update_xml_structure(proj_path, new_inc_paths, new_src_groups):
         for path in new_inc_paths:
             path_norm = path.replace("\\", "/").lower()
             if path_norm not in norm_final_paths:
-                final_paths.append(path)
+                final_paths.append(path.replace("\\", "/"))
                 norm_final_paths.append(path_norm)
 
-        node.text = ";".join(final_paths)
+        node.text = ";".join(p.replace("\\", "/") for p in final_paths)
         updated_inc_count += 1
 
     print(f"  - 已更新 {updated_inc_count} 处 IncludePath 配置")
@@ -207,7 +207,9 @@ def update_xml_structure(proj_path, new_inc_paths, new_src_groups):
             for f in files_node.findall("File"):
                 fp = f.find("FilePath")
                 if fp is not None and fp.text:
-                    existing_file_paths.append(fp.text.replace("\\", "/").lower())
+                    if "\\" in fp.text:
+                        fp.text = fp.text.replace("\\", "/")
+                    existing_file_paths.append(fp.text.lower())
 
             for file_info in file_list:
                 norm_path = file_info["path"].replace("\\", "/").lower()
@@ -231,7 +233,27 @@ def update_xml_structure(proj_path, new_inc_paths, new_src_groups):
     print(f"  - 已向工程添加 {total_added_files} 个新源文件")
     print(f"  - 已从工程移除 {total_removed_files} 个失效文件")
 
-    # 3. 保存并美化
+    # 3. 清洗被错误写入路径的文件级配置选项 (针对 CubeMX 生成后可能导致的污染)
+    # -------------------------------------------------
+    cleaned_tags_count = 0
+    for tag_name in ["MiscControls", "Define"]:
+        for node in root.iter(tag_name):
+            if node.text and "ReactorLibs" in node.text and ";" in node.text:
+                node.text = ""
+                cleaned_tags_count += 1
+                
+    # 清理 FileOption 和 GroupOption 下的 IncludePath 污染
+    for opt_tag in ["FileOption", "GroupOption"]:
+        for opt_node in root.iter(opt_tag):
+            for inc_node in opt_node.iter("IncludePath"):
+                if inc_node.text and "ReactorLibs" in inc_node.text:
+                    inc_node.text = ""
+                    cleaned_tags_count += 1
+    
+    if cleaned_tags_count > 0:
+        print(f"  - 已清洗 {cleaned_tags_count} 处被破坏的文件级选项 (MiscControls/Define)")
+
+    # 4. 保存并美化
     indent(root)
     tree.write(proj_path, encoding="UTF-8", xml_declaration=True)
     print("  - XML 文件保存完成")
