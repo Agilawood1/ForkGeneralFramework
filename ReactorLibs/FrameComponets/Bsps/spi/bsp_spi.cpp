@@ -10,23 +10,33 @@ static constexpr uint8_t MAX_SPI_BUS_NUM = 6;
 struct SpiBusState {
     SpiID spi_id;
     Device* active_device;
+    Device* dma_owner_device;
     DmaState dma_state;
 };
 static SpiBusState spi_buses[MAX_SPI_BUS_NUM];
 static uint8_t spi_buses_count = 0;
 
-static void SetActiveDevice(SpiID id, Device* dev) {
+static SpiBusState* GetOrCreateBusState(SpiID id) {
     for (uint8_t i = 0; i < spi_buses_count; i++) {
         if (spi_buses[i].spi_id == id) {
-            spi_buses[i].active_device = dev;
-            return;
+            return &spi_buses[i];
         }
     }
     if (spi_buses_count < MAX_SPI_BUS_NUM) {
         spi_buses[spi_buses_count].spi_id = id;
-        spi_buses[spi_buses_count].active_device = dev;
+        spi_buses[spi_buses_count].active_device = nullptr;
+        spi_buses[spi_buses_count].dma_owner_device = nullptr;
         spi_buses[spi_buses_count].dma_state = DmaState::Idle;
         spi_buses_count++;
+        return &spi_buses[spi_buses_count - 1];
+    }
+    return nullptr;
+}
+
+static void SetActiveDevice(SpiID id, Device* dev) {
+    SpiBusState* bus = GetOrCreateBusState(id);
+    if (bus != nullptr) {
+        bus->active_device = dev;
     }
 }
 
@@ -40,17 +50,9 @@ static Device* GetActiveDevice(SpiID id) {
 }
 
 static void SetDmaState(SpiID id, DmaState state) {
-    for (uint8_t i = 0; i < spi_buses_count; i++) {
-        if (spi_buses[i].spi_id == id) {
-            spi_buses[i].dma_state = state;
-            return;
-        }
-    }
-    if (spi_buses_count < MAX_SPI_BUS_NUM) {
-        spi_buses[spi_buses_count].spi_id = id;
-        spi_buses[spi_buses_count].active_device = nullptr;
-        spi_buses[spi_buses_count].dma_state = state;
-        spi_buses_count++;
+    SpiBusState* bus = GetOrCreateBusState(id);
+    if (bus != nullptr) {
+        bus->dma_state = state;
     }
 }
 
@@ -61,6 +63,22 @@ static DmaState GetDmaState(SpiID id) {
         }
     }
     return DmaState::Idle;
+}
+
+static void SetDmaOwnerDevice(SpiID id, Device* dev) {
+    SpiBusState* bus = GetOrCreateBusState(id);
+    if (bus != nullptr) {
+        bus->dma_owner_device = dev;
+    }
+}
+
+static Device* GetDmaOwnerDevice(SpiID id) {
+    for (uint8_t i = 0; i < spi_buses_count; i++) {
+        if (spi_buses[i].spi_id == id) {
+            return spi_buses[i].dma_owner_device;
+        }
+    }
+    return nullptr;
 }
 
 Device::Device(SpiID spi, Pin cs_pin)
@@ -149,6 +167,9 @@ void Device::Init(SpiID spi, Pin cs_pin)
 void Device::Transmit(uint8_t *tx_data, uint16_t size)
 {
 #ifdef USE_REAL_HAL
+  if (GetDmaState(this->spi_id) == DmaState::Busy)
+    return;
+
   if (this->has_cs_)
     HAL_GPIO_WritePin((GPIO_TypeDef *)this->cs_port_, this->cs_pin_, GPIO_PIN_RESET);
 
@@ -162,6 +183,9 @@ void Device::Transmit(uint8_t *tx_data, uint16_t size)
 void Device::Receive(uint8_t *rx_data, uint16_t size)
 {
 #ifdef USE_REAL_HAL
+  if (GetDmaState(this->spi_id) == DmaState::Busy)
+    return;
+
   if (this->has_cs_)
     HAL_GPIO_WritePin((GPIO_TypeDef *)this->cs_port_, this->cs_pin_, GPIO_PIN_RESET);
 
@@ -175,6 +199,9 @@ void Device::Receive(uint8_t *rx_data, uint16_t size)
 void Device::TransRecv(uint8_t *tx_data, uint8_t *rx_data, uint16_t size)
 {
 #ifdef USE_REAL_HAL
+  if (GetDmaState(this->spi_id) == DmaState::Busy)
+    return;
+
   if (this->has_cs_)
     HAL_GPIO_WritePin((GPIO_TypeDef *)this->cs_port_, this->cs_pin_, GPIO_PIN_RESET);
 
@@ -217,12 +244,14 @@ bool Device::TransmitDMA(uint8_t *tx_data, uint16_t size)
   if (status == HAL_OK)
   {
     SetActiveDevice(this->spi_id, this);
+    SetDmaOwnerDevice(this->spi_id, this);
     SetDmaState(this->spi_id, DmaState::Busy);
     return true;
   }
 
   this->Deselect();
   SetActiveDevice(this->spi_id, nullptr);
+  SetDmaOwnerDevice(this->spi_id, nullptr);
   SetDmaState(this->spi_id, DmaState::Error);
   return false;
 #endif
@@ -241,12 +270,14 @@ bool Device::ReceiveDMA(uint8_t *rx_data, uint16_t size)
   if (status == HAL_OK)
   {
     SetActiveDevice(this->spi_id, this);
+    SetDmaOwnerDevice(this->spi_id, this);
     SetDmaState(this->spi_id, DmaState::Busy);
     return true;
   }
 
   this->Deselect();
   SetActiveDevice(this->spi_id, nullptr);
+  SetDmaOwnerDevice(this->spi_id, nullptr);
   SetDmaState(this->spi_id, DmaState::Error);
   return false;
 #endif
@@ -265,12 +296,14 @@ bool Device::TransRecvDMA(uint8_t *tx_data, uint8_t *rx_data, uint16_t size)
   if (status == HAL_OK)
   {
     SetActiveDevice(this->spi_id, this);
+    SetDmaOwnerDevice(this->spi_id, this);
     SetDmaState(this->spi_id, DmaState::Busy);
     return true;
   }
 
   this->Deselect();
   SetActiveDevice(this->spi_id, nullptr);
+  SetDmaOwnerDevice(this->spi_id, nullptr);
   SetDmaState(this->spi_id, DmaState::Error);
   return false;
 #endif
@@ -279,10 +312,16 @@ bool Device::TransRecvDMA(uint8_t *tx_data, uint8_t *rx_data, uint16_t size)
 
 DmaState Device::ConsumeDmaState()
 {
+  if (GetDmaOwnerDevice(this->spi_id) != this)
+  {
+    return DmaState::Idle;
+  }
+
   DmaState state = GetDmaState(this->spi_id);
   if (state == DmaState::Done || state == DmaState::Error)
   {
     SetDmaState(this->spi_id, DmaState::Idle);
+    SetDmaOwnerDevice(this->spi_id, nullptr);
   }
   return state;
 }
