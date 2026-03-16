@@ -13,6 +13,7 @@ void IMU_Example::Start()
   dma_step_ = DmaStep::AccTrigger;
   dma_fail_cnt_ = 0;
   dma_pending_cnt_ = 0;
+  log_header_cnt_ = 20; // 首次运行时确保打印表头
 
   // 配置 SPI 实例: CS1_Accel -> PA4, CS1_Gyro -> PB0
   spi_acc_inst_.Init((BSP::SPI::SpiID)&hspi1, {'A', 4});
@@ -22,9 +23,9 @@ void IMU_Example::Start()
   imu_.Init(&spi_acc_inst_, &spi_gyro_inst_);
 
   Monitor &monit = Monitor::GetInstance();
-  monit.Track(imu_.gyro[0]);
-  monit.Track(imu_.gyro[1]);
-  monit.Track(imu_.gyro[2]);
+  monit.Track(imu_.gyro.x);
+  monit.Track(imu_.gyro.y);
+  monit.Track(imu_.gyro.z);
 
 #if IMU_EXAMPLE_USE_DMA
   BspLog_LogInfo("IMU_Example start in DMA SPI mode.");
@@ -117,14 +118,37 @@ void IMU_Example::Update()
 #endif
 
   tick_cnt_++;
-  if (tick_cnt_ > 9)
+  if (tick_cnt_ > 19)
   {
-    // 打印陀螺仪数据进行测试
-    const float *gyro = imu_.GetGyro();
-    monit.LogInfo("IMU_Gyro, x:%.3f, y:%.3f, z:%.3f", gyro[0], gyro[1], gyro[2]);
-#if IMU_EXAMPLE_USE_DMA
-    monit.LogInfo("IMU_DMA, fail:%lu, pending:%lu", dma_fail_cnt_, dma_pending_cnt_);
-#endif
     tick_cnt_ = 0;
+
+    // 定期打印表头以增强可读性
+    if (log_header_cnt_ >= 20)
+    {
+      log_header_cnt_ = 0;
+      monit.LogInfo("--- IMU DATA LOG (Unit: rad/s, m, rad) ---");
+      monit.LogInfo("%-10s | %-7s %-7s %-7s | %-7s %-7s %-7s",
+                    "Tag_G&P", "GyroX", "GyroY", "GyroZ", "PosX", "PosY", "PosZ");
+      monit.LogInfo("%-10s | %-7s %-7s %-7s | %-7s %-7s",
+                    "Tag_A&D", "AngX", "AngY", "AngZ", "DMAF", "DMAP");
+      monit.LogInfo("---------------------------------------------------------");
+    }
+
+    log_header_cnt_++;
+
+    // 获取数据
+    const Vec3 &gyro = imu_.GetGyro();
+    const Vec3 &odom_ang = imu_.GetOdomAngleRad();
+    const Vec3 &odom_pos = imu_.GetOdomPositionM();
+
+    // 拆分为两行打印，防止单行过长超出 Log 缓冲区。
+    monit.LogInfo("%-10s | %7.3f %7.3f %7.3f | %7.3f %7.3f %7.3f",
+                  "IMU_GP",
+                  gyro.x, gyro.y, gyro.z,
+                  odom_pos.x, odom_pos.y, odom_pos.z);
+    monit.LogInfo("%-10s | %7.3f %7.3f %7.3f | %7lu %7lu",
+                  "IMU_AD",
+                  odom_ang.x, odom_ang.y, odom_ang.z,
+                  dma_fail_cnt_, dma_pending_cnt_);
   }
 }

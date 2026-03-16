@@ -29,4 +29,5 @@ private:
   uint32_t tick_cnt_ = 0; // 更新计数器，用于降频打印
   uint32_t dma_fail_cnt_ = 0;
   uint32_t dma_pending_cnt_ = 0;
+  uint32_t log_header_cnt_ = 0; // 日志表头计数器
 };
