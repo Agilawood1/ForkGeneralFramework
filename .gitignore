@@ -44,6 +44,9 @@ __pycache__/
 AGENTS.md
 .agent_prompts/
 ReactorLibs/Extensions/
+ReactorLibs/Extensions70/
+ReactorLibs/Extensions
+ReactorLib/Extensions70
 reactor_intro.md
 external_file/
 
@@ -63,4 +66,4 @@ CMakePresets.json
 
 MDK-ARM/RTE/_GeneralFramework/RTE_Components.h
 
-ReactorLibs/Extensions
+
