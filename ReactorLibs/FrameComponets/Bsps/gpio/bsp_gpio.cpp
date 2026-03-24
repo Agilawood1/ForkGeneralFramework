@@ -1,96 +1,298 @@
 #include "bsp_gpio.hpp"
+#include "bsp_halport.hpp"
+#include "bsp_log.hpp"
 
-static BspGpio_Instance *bspgpio_insts[BSPGPIO_MAX_INSTS] = {NULL}; 
-static int bspgpio_inst_count = 0; // 当前实例数量
+using namespace BSP::GPIO;
 
-///@brief 在cube中初始化后，注册一个GPIO实例
-void BspGpio_InstRegist(BspGpio_Instance *inst,GPIO_TypeDef *GPIOx,uint32_t Pin)
+/// @brief EXTI0~EXTI15 的单槽回调表（后注册覆盖先注册）
+static ExtiHandler exti_handlers[16] = {nullptr};
+
+/**
+ * @brief 将单 bit 引脚掩码转换为 EXTI 索引
+ * @param pin_mask 引脚掩码（应为 2^n）
+ * @return 0~15 为有效索引，16 表示非法掩码
+ */
+static uint8_t GetPinIndex(uint16_t pin_mask)
 {
-    // 检验参数有效性
-    if (inst == NULL || GPIOx == NULL)
+    if (pin_mask == 0 || (pin_mask & (pin_mask - 1U)) != 0)
     {
-        return; //参数无效
-    }
-    // 将实例映射到已经初始化的GPIO
-    inst->GPIO_Port = GPIOx;
-    inst->Pin = Pin;
-
-    // 记录实例
-    if (bspgpio_inst_count < BSPGPIO_MAX_INSTS)
-    {
-        bspgpio_insts[bspgpio_inst_count++] = inst;    
+        return 16;
     }
 
-}
-
-static BspGpio_ExtiHandler exti_handlers[16] = {NULL};  //将所有上层注册的中断处理函数存储在这里
-
-///@brief 当收到中断时，通过快速索引数组可以获取对应的处理函数
-static uint8_t BspGpio_GetPinIndex(uint16_t GPIO_Pin)
-{
-    // 检查是否有且仅传入一个引脚,原则上通过NVIC后在PR寄存器中只能有一个位被置位
-    if (GPIO_Pin == 0 || (GPIO_Pin & (GPIO_Pin - 1)) != 0)  //因为寄存器中GPIO_Pin的值都是以位掩码存在的，如0x0001,0x0002,0x0004,0x0008...
-    {
-        return 16; // 无效索引
-    }
-    
-    // 计算位的位置 (即EXTI0-15的索引)
     uint8_t index = 0;
-    uint16_t temp_pin = GPIO_Pin;
-    while (temp_pin > 1) // 循环直到找到设置的位
+    while (pin_mask > 1U)
     {
-        temp_pin >>= 1;
+        pin_mask >>= 1U;
         index++;
     }
     return index;
 }
 
-void BspGpio_ExtiHandlerRegist(BspGpio_Instance *inst, BspGpio_ExtiHandler handler_func)
+/**
+ * @brief 将引脚号转换为位掩码
+ * @param pin_number 引脚号（0~15）
+ * @return 对应位掩码；非法编号返回 0
+ */
+static uint16_t NumberToMask(uint8_t pin_number)
 {
-    uint8_t index = BspGpio_GetPinIndex(inst->Pin);
-    
-    // 检查索引是否在0-15范围内
-    if (index < 16)
+    if (pin_number > 15U)
     {
-        // 将函数指针存储到静态数组中
-        exti_handlers[index] = handler_func;
+        return 0U;
     }
-    
+    return static_cast<uint16_t>(1U << pin_number);
 }
-///@brief 回调函数的实函数
+
+/**
+ * @brief 将端口字母映射为不透明端口指针
+ * @param port_char 端口字母（A~I）
+ * @return 有效端口返回非空，非法端口返回 nullptr
+ */
+static void* PortCharToOpaque(char port_char)
+{
+#ifdef USE_REAL_HAL
+    switch (port_char)
+    {
+#ifdef GPIOA
+    case 'A': return (void*)GPIOA;
+#endif
+#ifdef GPIOB
+    case 'B': return (void*)GPIOB;
+#endif
+#ifdef GPIOC
+    case 'C': return (void*)GPIOC;
+#endif
+#ifdef GPIOD
+    case 'D': return (void*)GPIOD;
+#endif
+#ifdef GPIOE
+    case 'E': return (void*)GPIOE;
+#endif
+#ifdef GPIOF
+    case 'F': return (void*)GPIOF;
+#endif
+#ifdef GPIOG
+    case 'G': return (void*)GPIOG;
+#endif
+#ifdef GPIOH
+    case 'H': return (void*)GPIOH;
+#endif
+#ifdef GPIOI
+    case 'I': return (void*)GPIOI;
+#endif
+    default: return nullptr;
+    }
+#else
+    (void)port_char;
+    return nullptr;
+#endif
+}
+
+/**
+ * @brief 检测 GPIO 端口时钟是否已开启
+ * @param port_opaque 端口指针
+ * @return true 已开启，false 未开启或无效
+ */
+static bool IsPortClockEnabled(void* port_opaque)
+{
+#ifdef USE_REAL_HAL
+    if (port_opaque == nullptr)
+    {
+        return false;
+    }
+
+    GPIO_TypeDef* GPIOx = static_cast<GPIO_TypeDef*>(port_opaque);
+#ifdef GPIOA
+    if (GPIOx == GPIOA) return __HAL_RCC_GPIOA_IS_CLK_ENABLED();
+#endif
+#ifdef GPIOB
+    if (GPIOx == GPIOB) return __HAL_RCC_GPIOB_IS_CLK_ENABLED();
+#endif
+#ifdef GPIOC
+    if (GPIOx == GPIOC) return __HAL_RCC_GPIOC_IS_CLK_ENABLED();
+#endif
+#ifdef GPIOD
+    if (GPIOx == GPIOD) return __HAL_RCC_GPIOD_IS_CLK_ENABLED();
+#endif
+#ifdef GPIOE
+    if (GPIOx == GPIOE) return __HAL_RCC_GPIOE_IS_CLK_ENABLED();
+#endif
+#ifdef GPIOF
+    if (GPIOx == GPIOF) return __HAL_RCC_GPIOF_IS_CLK_ENABLED();
+#endif
+#ifdef GPIOG
+    if (GPIOx == GPIOG) return __HAL_RCC_GPIOG_IS_CLK_ENABLED();
+#endif
+#ifdef GPIOH
+    if (GPIOx == GPIOH) return __HAL_RCC_GPIOH_IS_CLK_ENABLED();
+#endif
+#ifdef GPIOI
+    if (GPIOx == GPIOI) return __HAL_RCC_GPIOI_IS_CLK_ENABLED();
+#endif
+#endif
+    return false;
+}
+
+/**
+ * @brief 检测引脚是否已在 CubeMX 中初始化
+ * @param port_opaque 端口指针
+ * @param pin_mask 引脚位掩码
+ * @return true 已初始化（非 Analog 模式），false 未初始化
+ * @note 此处逻辑针对 STM32 F4/F7/H7/G4 等具有 MODER 寄存器的系列。
+ *       F1 系列（使用 CRL/CRH 寄存器）需要另行适配。
+ */
+static bool IsPinInitialized(void* port_opaque, uint16_t pin_mask)
+{
+#ifdef USE_REAL_HAL
+    if (port_opaque == nullptr || pin_mask == 0U)
+    {
+        return false;
+    }
+
+    const uint8_t index = GetPinIndex(pin_mask);
+    if (index >= 16)
+    {
+        return false;
+    }
+
+    GPIO_TypeDef* GPIOx = static_cast<GPIO_TypeDef*>(port_opaque);
+    // MODER 寄存器每位占用 2 bits。复位值通常为 0x3 (Analog)，初始化后通常为 0x0, 0x1, 0x2
+    uint32_t mode = (GPIOx->MODER >> (index * 2)) & 0x03U;
+    return (mode != 0x03U);
+#else
+    (void)port_opaque;
+    (void)pin_mask;
+    return false;
+#endif
+}
+
+Inst::Inst() : port_opaque(nullptr), pin_mask(0U), valid(false)
+{
+}
+
+Inst::Inst(Pin pin)
+{
+    this->port_opaque = PortCharToOpaque(pin.port);
+    this->pin_mask = NumberToMask(pin.number);
+
+    // 基础合法性检查：端口和掩码必须对应底层硬件定义
+    const bool basic_valid = (this->port_opaque != nullptr && this->pin_mask != 0U);
+    if (!basic_valid)
+    {
+        BspLog_LogWarning("[GPIO] Pin Definition Illegal: Port %c, Pin %d\n", pin.port, pin.number);
+        this->valid = false;
+        return;
+    }
+
+    // 扩展检查：检测 CubeMX 硬件配置是否就绪
+    const bool clock_enabled = IsPortClockEnabled(this->port_opaque);
+    const bool pin_init = IsPinInitialized(this->port_opaque, this->pin_mask);
+
+    if (!clock_enabled)
+    {
+        BspLog_LogWarning("[GPIO] Port %c Clock NOT Enabled. Check CubeMX!\n", pin.port);
+    }
+
+    if (!pin_init)
+    {
+        BspLog_LogWarning("[GPIO] Pin %c%d NOT Configured. Check MODER!\n", pin.port, pin.number);
+    }
+
+    // 只有时钟已开启且引脚模式已被配置（非模拟输入）才判定为有效
+    this->valid = basic_valid && clock_enabled && pin_init;
+}
+
+bool Inst::Read() const
+{
+    if (!this->valid)
+    {
+        return false;
+    }
+
+#ifdef USE_REAL_HAL
+    return HAL_GPIO_ReadPin((GPIO_TypeDef*)this->port_opaque, this->pin_mask) == GPIO_PIN_SET;
+#else
+    return false;
+#endif
+}
+
+void Inst::Write(bool high) const
+{
+    if (!this->valid)
+    {
+        return;
+    }
+
+#ifdef USE_REAL_HAL
+    HAL_GPIO_WritePin((GPIO_TypeDef*)this->port_opaque, this->pin_mask, high ? GPIO_PIN_SET : GPIO_PIN_RESET);
+#else
+    (void)high;
+#endif
+}
+
+void Inst::Toggle() const
+{
+    if (!this->valid)
+    {
+        return;
+    }
+
+#ifdef USE_REAL_HAL
+    HAL_GPIO_TogglePin((GPIO_TypeDef*)this->port_opaque, this->pin_mask);
+#endif
+}
+
+void Inst::Lock() const
+{
+    if (!this->valid)
+    {
+        return;
+    }
+
+#ifdef USE_REAL_HAL
+    HAL_GPIO_LockPin((GPIO_TypeDef*)this->port_opaque, this->pin_mask);
+#endif
+}
+
+void Inst::RegisterExtiHandler(ExtiHandler handler) const
+{
+    if (!this->valid)
+    {
+        return;
+    }
+
+    const uint8_t index = GetPinIndex(this->pin_mask);
+    if (index >= 16)
+    {
+        return;
+    }
+
+    exti_handlers[index] = handler;
+}
+
+bool Inst::IsValid() const
+{
+    return this->valid;
+}
+
+/**
+ * @brief HAL EXTI 回调桥接入口
+ * @param GPIO_Pin HAL 上报的引脚掩码
+ * @note 仅按引脚线分发，回调中的 pin.port 固定为 '\\0'
+ */
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
-    uint8_t index = BspGpio_GetPinIndex(GPIO_Pin);
-    if (index < 16)
+    const uint8_t index = GetPinIndex(GPIO_Pin);
+    if (index >= 16)
     {
-        BspGpio_ExtiHandler upper_handler = exti_handlers[index];
-        
-        if (upper_handler != NULL)
-        {
-            upper_handler(GPIO_Pin);
-        }
+        return;
     }
-}
 
+    ExtiHandler handler = exti_handlers[index];
+    if (handler == nullptr)
+    {
+        return;
+    }
 
-/******* 以下是对HAL库函数的复写，供上层使用的接口函数 *******/
-
-uint32_t BspGpio_GetState(BspGpio_Instance *inst)
-{
-    return HAL_GPIO_ReadPin(inst->GPIO_Port, inst->Pin);
-}
-
-void BspGpio_SetState(BspGpio_Instance *inst, bool PinState)
-{
-    HAL_GPIO_WritePin(inst->GPIO_Port, inst->Pin, (GPIO_PinState)PinState);
-}
-
-void BspGpio_TogglePin(BspGpio_Instance *inst)
-{
-    HAL_GPIO_TogglePin(inst->GPIO_Port, inst->Pin);
-}
-
-void BspGpio_LockPin(BspGpio_Instance *inst)
-{
-    HAL_GPIO_LockPin(inst->GPIO_Port, inst->Pin);
+    Pin pin = {'\0', index};
+    handler(pin);
 }

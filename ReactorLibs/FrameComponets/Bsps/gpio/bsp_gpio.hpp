@@ -1,38 +1,64 @@
-#ifndef BSP_GPIO_H
-#define BSP_GPIO_H
-#include "bsp_halport.hpp"
+#pragma once
 
+#include <cstdint>
+#include "std_math.hpp"
 
-
-#define BSPGPIO_MAX_INSTS 140 // 最多支持140个GPIO实例
-
-
-/// @brief BSPGPIO实例定义
-typedef struct BspGpio_Instance_t
+namespace BSP
 {
-    GPIO_TypeDef *GPIO_Port;     //GPIO初始化的端口
-    uint32_t Pin;                //引脚号
+namespace GPIO
+{
+    /**
+     * @brief EXTI 处理回调类型（按引脚线分发）
+     */
+    using ExtiHandler = void (*)(Pin pin);
 
-} BspGpio_Instance;
+    /**
+     * @brief GPIO 实例（HAL 解耦表示）
+     */
+    class Inst
+    {
+    public:
+        Inst();
+        explicit Inst(Pin pin);
 
+        /**
+         * @brief 读取 GPIO 电平
+         * @return true 高电平，false 低电平或实例无效
+         */
+        bool Read() const;
 
-/****** 函数 ******/
-void BspGpio_InstRegist(BspGpio_Instance *inst, GPIO_TypeDef *GPIO_Init,uint32_t Pin); 
+        /**
+         * @brief 写 GPIO 电平
+         * @param high true 高电平，false 低电平
+         */
+        void Write(bool high) const;
 
+        /**
+         * @brief 翻转 GPIO 电平
+         */
+        void Toggle() const;
 
-uint32_t BspGpio_GetState(BspGpio_Instance *inst);
-void BspGpio_SetState(BspGpio_Instance *inst, bool PinState);
-void BspGpio_TogglePin(BspGpio_Instance *inst);
-void BspGpio_LockPin(BspGpio_Instance *inst);
+        /**
+         * @brief 锁定 GPIO 配置
+         */
+        void Lock() const;
 
-typedef void (*BspGpio_ExtiHandler)(uint16_t pin);
+        /**
+         * @brief 注册 EXTI 回调（单 pin 单 handler）
+         * @param handler 回调函数
+         */
+        void RegisterExtiHandler(ExtiHandler handler) const;
 
-// BSP层定义一个注册函数接口，上层应用通过这个函数将自己的逻辑函数注册进来
-void BspGpio_ExtiHandlerRegist(BspGpio_Instance *inst, BspGpio_ExtiHandler handler_func);
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin);
-static uint8_t BspGpio_GetPinIndex(uint16_t GPIO_Pin);
+        /**
+         * @brief 当前实例是否有效
+         * @return true 有效，false 无效
+         */
+        bool IsValid() const;
 
-
-
-
-#endif
+    private:
+        void* port_opaque; ///< 端口不透明指针（内部映射为 GPIO_TypeDef*）
+        uint16_t pin_mask; ///< 引脚位掩码（GPIO_PIN_X）
+        bool valid;        ///< 实例是否有效
+    };
+}
+}
