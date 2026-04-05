@@ -1,7 +1,6 @@
 #include "MainFrame.hpp"
 #include "Monitor.hpp"
 #include "System.hpp"
-#include "IMUOdom_Test.hpp"
 
 StateCore &core = StateCore::GetInstance();
 Monitor &monit = Monitor::GetInstance();
@@ -25,4 +24,5 @@ void MainFrameCpp()
 
 void Action_of_Dege(StateCore *core)
 {
+
 }
