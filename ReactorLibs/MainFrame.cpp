@@ -1,12 +1,15 @@
 #include "MainFrame.hpp"
 #include "Monitor.hpp"
 #include "System.hpp"
+#include "Lift_Leg.hpp"
 
 StateCore &core = StateCore::GetInstance();
 Monitor &monit = Monitor::GetInstance();
 
 StateGraph example_graph("graph_name");
 void Action_of_Dege(StateCore *core);
+Lift_Leg &lift_leg = Lift_Leg::GetInstance();
+
 
 /**
  * @brief 程序主入口
@@ -14,6 +17,8 @@ void Action_of_Dege(StateCore *core);
  */
 void MainFrameCpp()
 {
+  System.RegistApp(lift_leg);
+
   // 配置状态图为简并模式
   example_graph.Degenerate(Action_of_Dege);
 
