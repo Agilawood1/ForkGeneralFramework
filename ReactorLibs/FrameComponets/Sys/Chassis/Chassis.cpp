@@ -1,34 +1,119 @@
 #include "Chassis.hpp"
 #include "arm_math.h"
 #include "Monitor.hpp"
+#include "farcon.hpp"
+#include "InterBoardComm.hpp"
+
 
 ChassisType& test_chas = ChassisType::GetInstance();
+//extern Farcon farcon;
 
 void ChassisType::Start()
 {
     // 初始化电机
     for (int i = 0; i < 4; i++)
     {
-        // motors[i].Init(Hardware::hcan_main, i + 1, MotorDJIMode::PID_SpeedControl);
-        // motors[i].speed_pid.Init(3.6, 2.4, 0.0);
-        // motors[i].speed_pid.ForwardLize(PidGeneral::SpeedForward, 1.5f, 5, 4.8); 			// 速度型前馈
-        // motors[i].Enable();
+        motors[i].Init(Hardware::hcan_main, i + 1, DJI_C620);
+        // motors[i].SetDt(0.002); // 底盘的电机设为500Hz
+        // motors[i].ConfigADRC()
+        // .AsSpeedC()
+        // .ADRC_Womega(32.0f, 7.6f)
+        // .ADRC_Physic(5.29e-4f, 0.30f, 0.005f)
+        // .ADRC_Limit(15.0f)
+        // .SpdLimit(1500.0f)
+        // .ADRC_MaxPlannedVel(1500.0f)
+        // .ADRC_SOTF(0.97f)
+        // .Apply();
+        // motors[i].driver.Enable();
     }
+    motors[2].SetDt(0.002); // 底盘的电机设为500Hz
+    motors[3].SetDt(0.002); // 底盘的电机设为500Hz
+    motors[0].ConfigADRC()
+    .AsSpeedC()
+    .ADRC_Womega(42.0f, 9.6f)
+    .ADRC_Physic(2.0e-4f, 0.30f, 0.005f)
+    .ADRC_Limit(15.0f)
+    .SpdLimit(3000.0f)
+    .ADRC_MaxPlannedVel(3000.0f)
+    .ADRC_SOTF(0.5f)
+    .Apply();
+    motors[0].driver.Enable();
+
+    motors[1].ConfigADRC()
+    .AsSpeedC()
+    .ADRC_Womega(42.0f, 9.6f)
+    .ADRC_Physic(2.0e-4f, 0.30f, 0.005f)
+    .ADRC_Limit(15.0f)
+    .SpdLimit(3000.0f)
+    .ADRC_MaxPlannedVel(3000.0f)
+    .ADRC_SOTF(0.5f)
+    .Apply();
+    motors[1].driver.Enable();
+
+    motors[2].ConfigADRC()
+    .AsSpeedC()
+    .ADRC_Womega(42.0f, 9.6f)
+    .ADRC_Physic(2.0e-4f, 0.30f, 0.005f)
+    .ADRC_Limit(15.0f)
+    .SpdLimit(3000.0f)
+    .ADRC_MaxPlannedVel(3000.0f)
+    .ADRC_SOTF(0.5f)
+    .Apply();
+    motors[2].driver.Enable();
+
+    motors[3].ConfigADRC()
+    .AsSpeedC()
+    .ADRC_Womega(42.0f, 9.6f)
+    .ADRC_Physic(2.0e-4f, 0.30f, 0.005f)
+    .ADRC_Limit(15.0f)
+    .SpdLimit(3000.0f)
+    .ADRC_MaxPlannedVel(3000.0f)
+    .ADRC_SOTF(0.5f)
+    .Apply();
+    motors[3].driver.Enable();
+
+    SetGear(FIRST);
+//    if(farcon.toggle[1] == 0)
+//    {
+//        control_mode = FARCON;
+//    }
+//    else 
+//    {
+//        control_mode = OPEN;
+//    }
+    chassis_board.Init(Hardware::hcan_main, 0x210, false);
+    chassis_board.RegisterTask(1, ChassisSpeedRxCallback, this);
 }
 
 void ChassisType::Update()
 {
+    // 检测退出debug，关闭所有电机dirver
+    if(System.out_from_debugmode == true)
+    {
+        for (int i = 0; i < 4; i++)
+        {
+            motors[i].Neutral();
+            motors[i].driver.Disable();
+        }
+    }
     // 遥控器控制逻辑
-
+    if(control_mode == FARCON)
+    {
+        // 读取遥控器数据到底盘控制变量
+        targ_speed.x = -farcon.jy_data_origin[3]*1.0f / 100.f * _max_velo;   // 前后
+        targ_speed.y = -farcon.jy_data_origin[2]*1.0f / 100.f * _max_velo;   // 左右
+        targ_speed.z = -farcon.jy_data_origin[0]*1.0f / 100.f * _max_omega;  // 旋转
+        this->Move(targ_speed);
+    }
 
     // 实现闭环的地方
     if (_walking || _is_pos_locked)
     {
-        _Walking();
+        move_ok = _Walking();
     }
     if (_rotating || _is_yaw_locked)
     {
-        _Rotating();
+        rotate_ok = _Rotating();
     }
     
     // 将底盘的 速度targ_speed 上传到各个电机
@@ -53,7 +138,7 @@ void ChassisType::_UpdateChasOdom()
     {
         theta_distan += motors[i].driver.measure.total_angle;
     }
-    theta_distan = theta_distan / (MotorDJIConst::redu_M3508 * 8192) * (PI * WHEEL_DIAMETER) / 4.0f;
+    theta_distan = theta_distan / (MotorDJIConst::redu_M3508_R2 * 8192) * (PI * WHEEL_DIAMETER) / 4.0f;
     float chas_theta = theta_distan / ROTATE_RADIUS;   // 单位：弧度
     
     // （2）获取车体速度(读取而不是控制的速度，以减少误差)
@@ -63,13 +148,13 @@ void ChassisType::_UpdateChasOdom()
     {
         chas_speed.z += motors[i].driver.measure.speed_rpm;
     }
-    chas_speed.z = (chas_speed.z / 240.0f) / (MotorDJIConst::redu_M3508) * (PI * WHEEL_DIAMETER);
+    chas_speed.z = (chas_speed.z / 240.0f) / (MotorDJIConst::redu_M3508_R2) * (PI * WHEEL_DIAMETER);
 
     // 获得每个电机不带旋转速度的线速度分量（用于计算x, y方向上的速度）
     float motor_spd_xy[4] = {0};
     for (int i = 0; i < 4; i++)
     {
-        motor_spd_xy[i] = (motors[i].driver.measure.speed_rpm / 60.0f / MotorDJIConst::redu_M3508) * (PI * WHEEL_DIAMETER) - chas_speed.z;
+        motor_spd_xy[i] = (motors[i].driver.measure.speed_rpm / 60.0f / MotorDJIConst::redu_M3508_R2) * (PI * WHEEL_DIAMETER) - chas_speed.z;
     }
 
     Vec2 chas_vxy;
@@ -117,8 +202,9 @@ void ChassisType::_UploadSpeed()
                 for (int i = 0; i < 4; i++)
                 {
                     targ_speed = Vec3(0, 0, 0);
-                    motors[i].Neutral();
+                    // motors[i].Neutral();
                 }
+                SetGear(NEUTRAL);
             }
         }
         else    // (2) 底盘已经停止，直接进入空档
@@ -126,8 +212,9 @@ void ChassisType::_UploadSpeed()
             for (int i = 0; i < 4; i++)
             {
                 targ_speed = Vec3(0, 0, 0);
-                motors[i].Neutral();
+                // motors[i].Neutral();
             }
+            SetGear(NEUTRAL);
         }
 
         
@@ -146,7 +233,7 @@ inline void ChassisType::_SendSpdToMotor()
     for (int i = 0; i < 4; i++)
     {
         // motors[i].SwitchMode(MotorDJIMode::PID_SpeedControl);
-        motors[i].SetSpd((_motor_spd[i] * 60.0f) / (PI * WHEEL_DIAMETER));
+        motors[i].SetSpd((_motor_spd[i] * 60.0f) * MotorDJIConst::redu_M3508_R2 / (PI * WHEEL_DIAMETER));
     }
 }
 
@@ -167,12 +254,26 @@ void ChassisType::MoveAt(Vec2 Pos)
 {
     targ_ges = Vec3(Pos.x, Pos.y, targ_ges.z);
     _walking = true;
+    if(GetGear() == NEUTRAL)
+    {
+        for(int i = 0; i < 4; i++)
+        {
+            motors[i].Uneutral();
+        }
+    }
 }
 
 void ChassisType::RotateAt(float yaw)
 {
     targ_ges.z = yaw;
     _rotating = true;
+    if(GetGear() == NEUTRAL)
+    {
+        for(int i = 0; i < 4; i++)
+        {
+            motors[i].Uneutral();
+        }
+    }
 }
 
 /**
@@ -325,4 +426,55 @@ bool ChassisType::_Rotating()
     Rotate(new_omega);
 		
     return false;
+}
+
+void ChassisType::SetSpeedParams(float max_accel, float max_velo, float max_omega, float max_beta)
+{
+    this->_max_accel = max_accel;
+    this->_max_velo = max_velo;
+    this->_max_omega = max_omega;
+    this->_max_beta = max_beta;
+}
+
+Gear ChassisType::GetGear()
+{
+    return this->_cur_gear;
+}
+
+void ChassisType::SetGear(Gear gear)
+{
+    this->_cur_gear = gear;
+    if(gear == NEUTRAL)
+    {
+        for(int i = 0; i < 4; i++)
+        {
+            motors[i].Neutral();
+        }
+    }
+    if(gear == FIRST)
+    {
+        SetSpeedParams(4.0, 1.0f, 0.6f, 2.0f);
+    }
+    if(gear == SECOND)
+    {
+        SetSpeedParams(5.0, 0.75f, 0.8f, 2.0f);
+    }
+    if(gear == THIRD)
+    {
+        SetSpeedParams(6.0, 1.0f, 1.0f, 2.0f);
+    }
+}
+
+void ChassisType::ChassisSpeedRxCallback(uint8_t task_id, const uint8_t* payload, uint8_t payload_len, void* user_ctx)
+{
+    ChassisType* self = static_cast<ChassisType*>(user_ctx);
+
+    if (payload == nullptr)
+    {
+        return;
+    }
+    
+    self->targ_speed.x = ((int16_t)(payload[0] << 8 | payload[1]));   
+    self->targ_speed.y = ((int16_t)(payload[2] << 8 | payload[3]));  
+    self->targ_speed.z = ((int16_t)(payload[4] << 8 | payload[5]));  
 }
